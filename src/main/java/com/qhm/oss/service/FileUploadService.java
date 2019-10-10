@@ -1,0 +1,157 @@
+package com.qhm.oss.service;
+
+import cn.hutool.core.date.DateTime;
+import com.aliyun.oss.OSS;
+import com.aliyun.oss.model.ListObjectsRequest;
+import com.aliyun.oss.model.OSSObject;
+import com.aliyun.oss.model.OSSObjectSummary;
+import com.aliyun.oss.model.ObjectListing;
+import com.qhm.oss.config.AliyunConfig;
+import com.qhm.oss.entity.FileUploadResult;
+import org.apache.commons.lang.math.RandomUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.*;
+import java.util.List;
+
+/**
+* @Description: 文件上传Service <br/>
+* @Author: qhm <br/>
+* @Date: 2019/10/10 10:22<br/>
+* @Version: 1.0 <br/>
+*/
+@Service
+public class FileUploadService {
+
+    //定义允许上传的格式
+    private static final String[] IMAGE_TYPE = new String[]{".bmp", ".jpg",
+            ".jpeg", ".gif", ".png"};
+
+    @Autowired
+    private OSS ossClient;
+
+    @Autowired
+    private AliyunConfig aliyunConfig;
+
+    public FileUploadResult upload(MultipartFile uploadFile) {
+        boolean b = this.checkFileType(uploadFile);
+        //封装Result对象，并且将文件的byte数组放置到result对象中
+        FileUploadResult fileUploadResult = new FileUploadResult();
+        if(!b){
+            fileUploadResult.setStatus("error");
+            return fileUploadResult;
+        }
+        //文件新路径
+        String fileName = uploadFile.getOriginalFilename();
+        String filePath = getFilePath(fileName);
+        //上传到ailiyun
+        try{
+            ossClient.putObject(aliyunConfig.getBucketName(), filePath, new
+                    ByteArrayInputStream(uploadFile.getBytes()));
+        } catch (Exception e) {
+            e.printStackTrace();
+            //上传失败
+            fileUploadResult.setStatus("error");
+            return fileUploadResult;
+        }
+        fileUploadResult.setStatus("done");
+        fileUploadResult.setResponse("success");
+        fileUploadResult.setName("http://"+this.aliyunConfig.getUrlPrefix() + filePath);
+        fileUploadResult.setUid(String.valueOf(System.currentTimeMillis()));
+        return fileUploadResult;
+    }
+
+    /**
+    * @Description: 查看文件列表 <br/>
+    * @Author  qhm    <br/>
+    * @Date: 2019/10/10 10:43 <br/>
+    * @Version: 1.0 <br/>
+    */
+    public List<OSSObjectSummary> list() {
+        // 设置最大个数。
+        final int maxKeys = 200;
+        // 列举文件。
+        ObjectListing objectListing = ossClient.listObjects(new ListObjectsRequest(aliyunConfig.getBucketName()).withMaxKeys(maxKeys));
+        List<OSSObjectSummary> sums = objectListing.getObjectSummaries();
+        return sums;
+    }
+
+
+    /**
+    * @Description: 删除文件 <br/>
+    * @Author  qhm    <br/>
+    * @Date: 2019/10/10 10:44 <br/>
+    * @Version: 1.0 <br/>
+    */
+    public FileUploadResult delete(String objectName) {
+        // 根据BucketName,objectName删除文件
+        ossClient.deleteObject(aliyunConfig.getBucketName(), objectName);
+        FileUploadResult fileUploadResult = new FileUploadResult();
+        fileUploadResult.setName(objectName);
+        fileUploadResult.setStatus("removed");
+        fileUploadResult.setResponse("success");
+        return fileUploadResult;
+    }
+
+    
+    /**
+    * @Description: 下载文件 <br/>
+    * @Author  qhm    <br/>
+    * @Date: 2019/10/10 10:44 <br/>
+    * @Version: 1.0 <br/>
+    */
+    public void exportOssFile(OutputStream os, String objectName) throws IOException {
+        // ossObject包含文件所在的存储空间名称、文件名称、文件元信息以及一个输入流。
+        OSSObject ossObject = ossClient.getObject(aliyunConfig.getBucketName(), objectName);
+        // 读取文件内容。
+        BufferedInputStream in = new BufferedInputStream(ossObject.getObjectContent());
+        BufferedOutputStream out = new BufferedOutputStream(os);
+        byte[] buffer = new byte[1024];
+        int lenght = 0;
+        while ((lenght = in.read(buffer)) != -1) {
+            out.write(buffer, 0, lenght);
+        }
+        if (out != null) {
+            out.flush();
+            out.close();
+        }
+        if (in != null) {
+            in.close();
+        }
+    }
+
+    /**
+     * @Description:  生成路径以及文件名 <br/>
+     * @Author  qhm    <br/>
+     * @Date: 2019/10/10 10:41 <br/>
+     * @Version: 1.0 <br/>
+     */
+    public String getFilePath(String sourceFileName) {
+        DateTime dateTime = new DateTime();
+        return "images/" + dateTime.toString("yyyy")
+                + "/" + dateTime.toString("MM") + "/"
+                + dateTime.toString("dd") + "/" + System.currentTimeMillis()+ "." + org.apache.commons.lang.StringUtils.substringAfterLast(sourceFileName, ".");
+    }
+
+
+
+    /**
+     * @Description: 校验图片格式 <br/>
+     * @Author qhm    <br/>
+     * @Date: 2019/10/10 10:30 <br/>
+     * @Version: 1.0 <br/>
+     */
+    public boolean checkFileType(MultipartFile uploadFile) {
+        boolean isLegal = false;
+        for (String type : IMAGE_TYPE) {
+            if (StringUtils.endsWithIgnoreCase(uploadFile.getOriginalFilename(), type)) {
+                isLegal = true;
+            }
+        }
+        return isLegal;
+
+    }
+}
